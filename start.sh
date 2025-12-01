@@ -273,8 +273,17 @@ start_foreground() {
 
     source .venv/bin/activate
 
+    # Get local IP
+    local LOCAL_IP=""
+    if command -v hostname &> /dev/null; then
+        LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    fi
+
     print_section "Starting Application"
-    echo -e "  ${ARROW} Web Dashboard:   ${CYAN}http://127.0.0.1:8080${NC}"
+    echo -e "  ${ARROW} Web Dashboard:   ${CYAN}http://0.0.0.0:8080${NC}"
+    if [ -n "$LOCAL_IP" ]; then
+        echo -e "  ${ARROW} Network Access:  ${CYAN}http://$LOCAL_IP:8080${NC}"
+    fi
     echo -e "  ${ARROW} Forward Server:  ${CYAN}ws://0.0.0.0:8765${NC}"
     echo ""
     echo -e "  ${DIM}Press Ctrl+C to stop${NC}"
@@ -307,10 +316,19 @@ start_background() {
 
     if kill -0 "$(cat $PID_FILE)" 2>/dev/null; then
         ENV_RUNNING=$(cat $PID_FILE)
+        # Get local IP
+        local LOCAL_IP=""
+        if command -v hostname &> /dev/null; then
+            LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+        fi
+
         print_info "Started with PID: $ENV_RUNNING"
         echo ""
         echo -e "  ${ARROW} Log file:        ${CYAN}$LOG_FILE${NC}"
-        echo -e "  ${ARROW} Web Dashboard:   ${CYAN}http://127.0.0.1:8080${NC}"
+        echo -e "  ${ARROW} Web Dashboard:   ${CYAN}http://0.0.0.0:8080${NC}"
+        if [ -n "$LOCAL_IP" ]; then
+            echo -e "  ${ARROW} Network Access:  ${CYAN}http://$LOCAL_IP:8080${NC}"
+        fi
         echo -e "  ${ARROW} Forward Server:  ${CYAN}ws://0.0.0.0:8765${NC}"
         echo ""
         echo -e "  ${DIM}View logs: tail -f $LOG_FILE${NC}"

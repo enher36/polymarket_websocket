@@ -27,6 +27,70 @@ ARROW="${CYAN}→${NC}"
 REPO_URL="https://github.com/enher36/polymarket_websocket.git"
 INSTALL_DIR="$HOME/polymarket_websocket"
 
+# ==================== System Detection ====================
+OS_TYPE=""
+OS_ID=""
+PKG_MANAGER=""
+SUDO_CMD=""
+
+detect_system() {
+    # Detect OS type
+    case "$(uname -s)" in
+        Linux*)     OS_TYPE="linux";;
+        Darwin*)    OS_TYPE="macos";;
+        CYGWIN*|MINGW*|MSYS*) OS_TYPE="windows";;
+        *)          OS_TYPE="unknown";;
+    esac
+
+    # Detect Linux distribution
+    if [ "$OS_TYPE" = "linux" ]; then
+        if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            OS_ID="$ID"
+        elif [ -f /etc/redhat-release ]; then
+            OS_ID="rhel"
+        elif [ -f /etc/debian_version ]; then
+            OS_ID="debian"
+        fi
+    fi
+
+    # Detect package manager
+    if [ "$OS_TYPE" = "macos" ]; then
+        if command -v brew &> /dev/null; then
+            PKG_MANAGER="brew"
+        fi
+    elif [ "$OS_TYPE" = "linux" ]; then
+        case "$OS_ID" in
+            ubuntu|debian|linuxmint|pop)
+                PKG_MANAGER="apt"
+                ;;
+            fedora|rhel|centos|rocky|alma)
+                if command -v dnf &> /dev/null; then
+                    PKG_MANAGER="dnf"
+                else
+                    PKG_MANAGER="yum"
+                fi
+                ;;
+            arch|manjaro)
+                PKG_MANAGER="pacman"
+                ;;
+            opensuse*|sles)
+                PKG_MANAGER="zypper"
+                ;;
+            alpine)
+                PKG_MANAGER="apk"
+                ;;
+        esac
+    fi
+
+    # Setup sudo if needed
+    if [ "$(id -u)" != "0" ] && [ "$PKG_MANAGER" != "brew" ]; then
+        if command -v sudo &> /dev/null; then
+            SUDO_CMD="sudo"
+        fi
+    fi
+}
+
 # ==================== Functions ====================
 print_banner() {
     echo -e "${CYAN}"
@@ -57,56 +121,152 @@ print_error() {
 }
 
 check_command() {
-    if command -v "$1" &> /dev/null; then
-        return 0
-    else
-        return 1
-    fi
+    command -v "$1" &> /dev/null
+}
+
+# ==================== Package Installation ====================
+install_package() {
+    local pkg_name="$1"
+    local friendly_name="${2:-$pkg_name}"
+
+    echo -e "  ${ARROW} Installing $friendly_name..."
+
+    case "$PKG_MANAGER" in
+        apt)
+            $SUDO_CMD apt-get update -qq
+            $SUDO_CMD apt-get install -y -qq "$pkg_name"
+            ;;
+        dnf)
+            $SUDO_CMD dnf install -y -q "$pkg_name"
+            ;;
+        yum)
+            $SUDO_CMD yum install -y -q "$pkg_name"
+            ;;
+        pacman)
+            $SUDO_CMD pacman -S --noconfirm --quiet "$pkg_name"
+            ;;
+        zypper)
+            $SUDO_CMD zypper install -y -q "$pkg_name"
+            ;;
+        apk)
+            $SUDO_CMD apk add --quiet "$pkg_name"
+            ;;
+        brew)
+            brew install --quiet "$pkg_name"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+install_python() {
+    echo -e "  ${ARROW} Installing Python 3..."
+
+    case "$PKG_MANAGER" in
+        apt)
+            $SUDO_CMD apt-get update -qq
+            $SUDO_CMD apt-get install -y -qq python3 python3-venv python3-pip
+            ;;
+        dnf|yum)
+            $SUDO_CMD $PKG_MANAGER install -y -q python3 python3-pip
+            ;;
+        pacman)
+            $SUDO_CMD pacman -S --noconfirm --quiet python python-pip
+            ;;
+        zypper)
+            $SUDO_CMD zypper install -y -q python3 python3-pip
+            ;;
+        apk)
+            $SUDO_CMD apk add --quiet python3 py3-pip
+            ;;
+        brew)
+            brew install --quiet python3
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+install_git() {
+    install_package "git" "Git"
+}
+
+install_curl() {
+    install_package "curl" "curl"
 }
 
 # ==================== Main Installation ====================
-TOTAL_STEPS=5
+TOTAL_STEPS=6
 
 main() {
     print_banner
 
-    # Step 1: Check prerequisites
-    print_step 1 "Checking prerequisites..."
+    # Detect system
+    detect_system
 
-    # Check Python
+    echo -e "  ${DIM}System: $OS_TYPE${OS_ID:+ ($OS_ID)}${NC}"
+    echo -e "  ${DIM}Package Manager: ${PKG_MANAGER:-none detected}${NC}"
+
+    # Step 1: Check and install prerequisites
+    print_step 1 "Checking system dependencies..."
+
+    # Check/Install curl
+    if check_command curl; then
+        print_info "curl found"
+    else
+        if [ -n "$PKG_MANAGER" ]; then
+            install_curl && print_info "curl installed" || {
+                print_error "Failed to install curl"
+                exit 1
+            }
+        else
+            print_error "curl is required. Please install manually."
+            exit 1
+        fi
+    fi
+
+    # Check/Install git
+    if check_command git; then
+        print_info "Git found"
+    else
+        if [ -n "$PKG_MANAGER" ]; then
+            install_git && print_info "Git installed" || {
+                print_error "Failed to install Git"
+                exit 1
+            }
+        else
+            print_error "Git is required. Please install manually."
+            exit 1
+        fi
+    fi
+
+    # Step 2: Check/Install Python
+    print_step 2 "Checking Python environment..."
+
     if check_command python3; then
         PYTHON_VER=$(python3 --version 2>&1 | cut -d' ' -f2)
         print_info "Python $PYTHON_VER found"
     else
-        print_error "Python 3 is required but not found"
-        echo -e "\n  Please install Python 3.10+ first:"
-        echo "    Ubuntu/Debian: sudo apt install python3 python3-pip"
-        echo "    macOS: brew install python3"
-        echo "    Windows: https://www.python.org/downloads/"
-        exit 1
+        if [ -n "$PKG_MANAGER" ]; then
+            install_python
+            if check_command python3; then
+                PYTHON_VER=$(python3 --version 2>&1 | cut -d' ' -f2)
+                print_info "Python $PYTHON_VER installed"
+            else
+                print_error "Failed to install Python"
+                exit 1
+            fi
+        else
+            print_error "Python 3 is required but not found"
+            echo -e "\n  Please install Python 3.10+ manually"
+            exit 1
+        fi
     fi
 
-    # Check git
-    if check_command git; then
-        print_info "Git found"
-    else
-        print_error "Git is required but not found"
-        echo -e "\n  Please install Git first:"
-        echo "    Ubuntu/Debian: sudo apt install git"
-        echo "    macOS: brew install git"
-        exit 1
-    fi
-
-    # Check curl
-    if check_command curl; then
-        print_info "curl found"
-    else
-        print_error "curl is required but not found"
-        exit 1
-    fi
-
-    # Step 2: Install uv if needed
-    print_step 2 "Setting up uv package manager..."
+    # Step 3: Install uv
+    print_step 3 "Setting up uv package manager..."
 
     if check_command uv; then
         UV_VER=$(uv --version 2>&1 | head -1 | cut -d' ' -f2)
@@ -120,16 +280,15 @@ main() {
 
         if check_command uv; then
             UV_VER=$(uv --version 2>&1 | head -1 | cut -d' ' -f2)
-            print_info "uv $UV_VER installed successfully"
+            print_info "uv $UV_VER installed"
         else
             print_error "Failed to install uv"
-            echo -e "\n  Please install manually: curl -LsSf https://astral.sh/uv/install.sh | sh"
             exit 1
         fi
     fi
 
-    # Step 3: Clone repository
-    print_step 3 "Cloning repository..."
+    # Step 4: Clone repository
+    print_step 4 "Cloning repository..."
 
     if [ -d "$INSTALL_DIR" ]; then
         print_warn "Directory already exists: $INSTALL_DIR"
@@ -137,22 +296,23 @@ main() {
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             rm -rf "$INSTALL_DIR"
-            echo -e "  ${ARROW} Cloning from GitHub..."
             git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
             print_info "Repository cloned"
         else
             print_info "Using existing installation"
+            cd "$INSTALL_DIR"
+            git pull origin main 2>/dev/null || true
+            print_info "Updated to latest version"
         fi
     else
-        echo -e "  ${ARROW} Cloning from GitHub..."
         git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
         print_info "Repository cloned to $INSTALL_DIR"
     fi
 
     cd "$INSTALL_DIR"
 
-    # Step 4: Setup virtual environment and install dependencies
-    print_step 4 "Installing dependencies..."
+    # Step 5: Setup virtual environment
+    print_step 5 "Installing dependencies..."
 
     echo -e "  ${ARROW} Creating virtual environment..."
     uv venv .venv
@@ -165,8 +325,8 @@ main() {
     echo -ne "\r"
     print_info "Dependencies installed"
 
-    # Step 5: Create .env if needed
-    print_step 5 "Finalizing setup..."
+    # Step 6: Finalize
+    print_step 6 "Finalizing setup..."
 
     if [ -f ".env.example" ] && [ ! -f ".env" ]; then
         cp .env.example .env
@@ -175,6 +335,14 @@ main() {
 
     chmod +x start.sh
     print_info "Made start.sh executable"
+
+    # Get local IP for display
+    LOCAL_IP=""
+    if [ "$OS_TYPE" = "linux" ]; then
+        LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    elif [ "$OS_TYPE" = "macos" ]; then
+        LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
+    fi
 
     # ==================== Done ====================
     echo -e "\n${GREEN}${BOLD}━━━ Installation Complete! ━━━${NC}\n"
@@ -185,12 +353,12 @@ main() {
     echo -e "    cd $INSTALL_DIR"
     echo -e "    ./start.sh"
     echo ""
-    echo -e "  ${BOLD}Or run directly:${NC}"
-    echo -e "    $INSTALL_DIR/start.sh"
-    echo ""
-    echo -e "  ${BOLD}Features:${NC}"
-    echo -e "    ${ARROW} Web Dashboard:   ${CYAN}http://127.0.0.1:8080${NC}"
-    echo -e "    ${ARROW} Forward Server:  ${CYAN}ws://0.0.0.0:8765${NC}"
+    echo -e "  ${BOLD}Access URLs:${NC}"
+    echo -e "    ${ARROW} Local:    ${CYAN}http://localhost:8080${NC}"
+    if [ -n "$LOCAL_IP" ]; then
+        echo -e "    ${ARROW} Network:  ${CYAN}http://$LOCAL_IP:8080${NC}"
+    fi
+    echo -e "    ${ARROW} WebSocket: ${CYAN}ws://0.0.0.0:8765${NC}"
     echo ""
 
     # Ask to start now

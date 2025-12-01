@@ -62,7 +62,7 @@ class Settings(BaseSettings):
         description="Enable local WebSocket forwarding server",
     )
     forward_host: str = Field(
-        default="127.0.0.1",
+        default="0.0.0.0",
         description="Host for local forwarding WebSocket server",
     )
     forward_port: int = Field(
@@ -76,7 +76,7 @@ class Settings(BaseSettings):
         description="Enable HTTP monitoring server for dashboard",
     )
     web_host: str = Field(
-        default="127.0.0.1",
+        default="0.0.0.0",
         description="Host for HTTP monitoring server",
     )
     web_port: int = Field(
