@@ -70,6 +70,20 @@ class Settings(BaseSettings):
         description="Port for local forwarding WebSocket server",
     )
 
+    # Web Monitoring Server Settings
+    web_enabled: bool = Field(
+        default=True,
+        description="Enable HTTP monitoring server for dashboard",
+    )
+    web_host: str = Field(
+        default="127.0.0.1",
+        description="Host for HTTP monitoring server",
+    )
+    web_port: int = Field(
+        default=8080,
+        description="Port for HTTP monitoring server",
+    )
+
     # Scanner Settings
     scan_interval_sec: int = Field(
         default=300,

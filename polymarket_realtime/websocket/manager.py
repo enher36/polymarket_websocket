@@ -329,7 +329,8 @@ class WebSocketManager:
     @property
     def is_connected(self) -> bool:
         """Check if WebSocket is currently connected."""
-        return self._ws is not None and self._ws.open
+        # websockets 15.x uses state instead of open
+        return self._ws is not None and self._ws.state.name == "OPEN"
 
     @property
     def subscription_count(self) -> int:

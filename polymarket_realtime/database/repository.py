@@ -192,6 +192,30 @@ class Database:
             rows = await cursor.fetchall()
             return {row["id"] for row in rows}
 
+    async def count_active_markets(self, category: Optional[str] = None) -> int:
+        """Get count of active markets efficiently.
+
+        Uses COUNT(*) for optimal performance instead of loading all IDs.
+
+        Args:
+            category: Optional category filter.
+
+        Returns:
+            Number of active markets.
+        """
+        async with self._get_connection() as conn:
+            if category:
+                cursor = await conn.execute(
+                    "SELECT COUNT(*) as cnt FROM markets WHERE active = 1 AND category = ?",
+                    (category,),
+                )
+            else:
+                cursor = await conn.execute(
+                    "SELECT COUNT(*) as cnt FROM markets WHERE active = 1",
+                )
+            row = await cursor.fetchone()
+            return row["cnt"] if row else 0
+
     async def deactivate_missing_markets(
         self,
         active_market_ids: set[str],

@@ -42,6 +42,10 @@ polymarket_realtime/
 ├── forward/
 │   ├── event_bus.py     # In-process pub/sub for real-time events (singleton: event_bus)
 │   └── ws_server.py     # Local WebSocket server for downstream consumers
+├── web/
+│   ├── server.py        # aiohttp HTTP server for monitoring dashboard
+│   ├── stats.py         # StatsCollector aggregates metrics from components
+│   └── static/index.html # Dashboard UI with EN/中文 language switch
 └── utils/
     ├── logging.py       # JSON structured logging
     ├── rate_limit.py    # Token bucket rate limiter
@@ -89,23 +93,84 @@ Key settings:
 - `POLYMARKET_FORWARD_ENABLED` - Enable local WebSocket forwarding server
 - `POLYMARKET_FORWARD_HOST` - Host for forwarding server (default: 127.0.0.1)
 - `POLYMARKET_FORWARD_PORT` - Port for forwarding server (default: 8765)
+- `POLYMARKET_WEB_ENABLED` - Enable HTTP monitoring dashboard (default: true)
+- `POLYMARKET_WEB_HOST` - Host for monitoring server (default: 127.0.0.1)
+- `POLYMARKET_WEB_PORT` - Port for monitoring server (default: 8080)
+
+## Web Monitoring Dashboard
+
+Access at `http://127.0.0.1:8080` (when enabled). Provides:
+- Upstream WebSocket connection status
+- Active market count from database
+- Downstream client connections
+- Application uptime
+- EN/中文 language toggle
+
+**API Endpoints:**
+- `GET /api/health` - Health check (returns `{"status": "ok"}`)
+- `GET /api/metrics` - Full metrics JSON:
+```json
+{
+  "timestamp": "ISO8601",
+  "uptime_seconds": 123.4,
+  "upstream": {"connected": true, "subscriptions": 100},
+  "downstream": {"enabled": true, "clients": 5, "subscriptions": 50},
+  "markets": {"active_count": 1500}
+}
+```
 
 ## Forward Server Client Protocol
 
 Downstream clients connect to `ws://{host}:{port}` and use JSON messages:
 
 ```json
-// Subscribe to a token
+// Subscribe to a single token
 {"action": "subscribe", "token": "<token_id>"}
 
-// Unsubscribe
+// Unsubscribe from a token
 {"action": "unsubscribe", "token": "<token_id>"}
+
+// List active markets (with optional category filter and limit)
+{"action": "list_markets", "category": "<optional>", "limit": 100}
+// Response: {"status": "markets", "count": N, "limit": 100, "max_limit": 500, "markets": [...]}
+
+// Subscribe to all tokens in a category
+{"action": "subscribe_category", "category": "<category>", "limit": 100}
+// Response: {"status": "subscribed_category", "market_count": N, "token_count": M, "new_subscriptions": K}
+
+// Subscribe to all active markets (uses max_limit)
+{"action": "subscribe_all"}
+// Response: same as subscribe_category
 
 // Heartbeat
 {"action": "ping"}
+// Response: {"status": "pong"}
 ```
 
-Events are pushed as:
+**Response format for list_markets:**
+```json
+{
+  "status": "markets",
+  "category": "politics",
+  "count": 10,
+  "limit": 100,
+  "max_limit": 500,
+  "markets": [
+    {
+      "id": "...",
+      "slug": "...",
+      "question": "...",
+      "category": "...",
+      "tokens": [
+        {"token_id": "...", "outcome": "Yes"},
+        {"token_id": "...", "outcome": "No"}
+      ]
+    }
+  ]
+}
+```
+
+**Events are pushed as:**
 ```json
 {"type": "<event_type>", "token_id": "<token_id>", "data": {...}, "timestamp": "ISO8601"}
 ```
