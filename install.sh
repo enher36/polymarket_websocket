@@ -206,7 +206,7 @@ configure_ports() {
     echo -e "  ${DIM}Press Enter to use default values${NC}\n"
 
     # Web Dashboard Port
-    read -p "  Web Dashboard port [${WEB_PORT}]: " input_web_port
+    read -p "  Web Dashboard port [${WEB_PORT}]: " input_web_port < /dev/tty
     if [ -n "$input_web_port" ]; then
         if [[ "$input_web_port" =~ ^[0-9]+$ ]] && [ "$input_web_port" -ge 1 ] && [ "$input_web_port" -le 65535 ]; then
             WEB_PORT="$input_web_port"
@@ -216,7 +216,7 @@ configure_ports() {
     fi
 
     # Forward Server Port
-    read -p "  Forward Server port [${FORWARD_PORT}]: " input_forward_port
+    read -p "  Forward Server port [${FORWARD_PORT}]: " input_forward_port < /dev/tty
     if [ -n "$input_forward_port" ]; then
         if [[ "$input_forward_port" =~ ^[0-9]+$ ]] && [ "$input_forward_port" -ge 1 ] && [ "$input_forward_port" -le 65535 ]; then
             FORWARD_PORT="$input_forward_port"
@@ -371,7 +371,7 @@ main() {
         echo -e "    ${CYAN}2${NC}) Reinstall - Remove and clone fresh"
         echo -e "    ${CYAN}3${NC}) Keep - Use existing without changes"
         echo ""
-        read -p "  Select option [1]: " -n 1 -r install_choice
+        read -p "  Select option [1]: " -n 1 -r install_choice < /dev/tty
         echo
 
         case "${install_choice:-1}" in
@@ -451,7 +451,7 @@ main() {
     echo ""
 
     # Ask to start now
-    read -p "  Start the application now? [Y/n] " -n 1 -r
+    read -p "  Start the application now? [Y/n] " -n 1 -r < /dev/tty
     echo
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         echo ""
