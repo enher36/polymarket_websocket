@@ -361,23 +361,40 @@ main() {
     configure_ports
 
     # Step 5: Clone repository
-    print_step 5 "Cloning repository..."
+    print_step 5 "Setting up repository..."
 
     if [ -d "$INSTALL_DIR" ]; then
-        print_warn "Directory already exists: $INSTALL_DIR"
-        read -p "  Remove and reinstall? [y/N] " -n 1 -r
+        print_info "Found existing installation: $INSTALL_DIR"
+        echo ""
+        echo -e "  ${BOLD}Options:${NC}"
+        echo -e "    ${CYAN}1${NC}) Update - Pull latest changes (recommended)"
+        echo -e "    ${CYAN}2${NC}) Reinstall - Remove and clone fresh"
+        echo -e "    ${CYAN}3${NC}) Keep - Use existing without changes"
+        echo ""
+        read -p "  Select option [1]: " -n 1 -r install_choice
         echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            rm -rf "$INSTALL_DIR"
-            git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
-            print_info "Repository cloned"
-        else
-            print_info "Using existing installation"
-            cd "$INSTALL_DIR"
-            git pull origin main 2>/dev/null || true
-            print_info "Updated to latest version"
-        fi
+
+        case "${install_choice:-1}" in
+            2)
+                echo -e "  ${ARROW} Removing existing installation..."
+                rm -rf "$INSTALL_DIR"
+                echo -e "  ${ARROW} Cloning fresh copy..."
+                git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+                print_info "Repository reinstalled"
+                ;;
+            3)
+                print_info "Using existing installation without changes"
+                ;;
+            *)
+                cd "$INSTALL_DIR"
+                echo -e "  ${ARROW} Pulling latest changes..."
+                git fetch origin main 2>/dev/null
+                git reset --hard origin/main 2>/dev/null || git pull origin main 2>/dev/null || true
+                print_info "Updated to latest version"
+                ;;
+        esac
     else
+        echo -e "  ${ARROW} Cloning repository..."
         git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
         print_info "Repository cloned to $INSTALL_DIR"
     fi
