@@ -198,11 +198,29 @@ install_curl() {
 }
 
 # ==================== Port Configuration ====================
-WEB_PORT=8080
-FORWARD_PORT=8765
+# Allow override via environment variables
+WEB_PORT="${WEB_PORT:-8080}"
+FORWARD_PORT="${FORWARD_PORT:-8765}"
+
+# Check if we can read from terminal
+can_read_tty() {
+    [ -t 0 ] || [ -c /dev/tty ] 2>/dev/null
+}
 
 configure_ports() {
     echo -e "\n${BOLD}Port Configuration${NC}\n"
+
+    # Check if interactive input is available
+    if ! can_read_tty || ! exec 3</dev/tty 2>/dev/null; then
+        print_warn "Non-interactive mode detected, using default ports"
+        print_info "Web Dashboard: port $WEB_PORT"
+        print_info "Forward Server: port $FORWARD_PORT"
+        echo -e "\n  ${DIM}Tip: Set ports via environment before install:${NC}"
+        echo -e "  ${DIM}WEB_PORT=3000 FORWARD_PORT=9000 bash install.sh${NC}"
+        return 0
+    fi
+    exec 3<&-
+
     echo -e "  ${DIM}Press Enter to use default values${NC}\n"
 
     # Web Dashboard Port
@@ -365,14 +383,22 @@ main() {
 
     if [ -d "$INSTALL_DIR" ]; then
         print_info "Found existing installation: $INSTALL_DIR"
-        echo ""
-        echo -e "  ${BOLD}Options:${NC}"
-        echo -e "    ${CYAN}1${NC}) Update - Pull latest changes (recommended)"
-        echo -e "    ${CYAN}2${NC}) Reinstall - Remove and clone fresh"
-        echo -e "    ${CYAN}3${NC}) Keep - Use existing without changes"
-        echo ""
-        read -p "  Select option [1]: " -n 1 -r install_choice < /dev/tty
-        echo
+
+        # Check for interactive mode
+        install_choice="1"
+        if can_read_tty && exec 3</dev/tty 2>/dev/null; then
+            exec 3<&-
+            echo ""
+            echo -e "  ${BOLD}Options:${NC}"
+            echo -e "    ${CYAN}1${NC}) Update - Pull latest changes (recommended)"
+            echo -e "    ${CYAN}2${NC}) Reinstall - Remove and clone fresh"
+            echo -e "    ${CYAN}3${NC}) Keep - Use existing without changes"
+            echo ""
+            read -p "  Select option [1]: " -n 1 -r install_choice < /dev/tty
+            echo
+        else
+            print_warn "Non-interactive mode, auto-selecting: Update"
+        fi
 
         case "${install_choice:-1}" in
             2)
@@ -450,14 +476,19 @@ main() {
     echo -e "    ${ARROW} WebSocket: ${CYAN}ws://0.0.0.0:${FORWARD_PORT}${NC}"
     echo ""
 
-    # Ask to start now
-    read -p "  Start the application now? [Y/n] " -n 1 -r < /dev/tty
-    echo
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        echo ""
-        exec ./start.sh
+    # Ask to start now (skip in non-interactive mode)
+    if can_read_tty && exec 3</dev/tty 2>/dev/null; then
+        exec 3<&-
+        read -p "  Start the application now? [Y/n] " -n 1 -r < /dev/tty
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            echo ""
+            exec ./start.sh
+        else
+            echo -e "\n  ${DIM}Run ./start.sh when ready${NC}\n"
+        fi
     else
-        echo -e "\n  ${DIM}Run ./start.sh when ready${NC}\n"
+        echo -e "\n  ${DIM}Run ./start.sh to start the application${NC}\n"
     fi
 }
 
