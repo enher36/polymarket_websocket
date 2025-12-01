@@ -22,6 +22,29 @@ CROSS="${RED}✗${NC}"
 WARN="${YELLOW}!${NC}"
 ARROW="${CYAN}→${NC}"
 
+# ==================== Port Configuration ====================
+get_configured_ports() {
+    # Default values
+    WEB_PORT=8080
+    FORWARD_PORT=8765
+
+    # Read from .env if exists
+    if [ -f ".env" ]; then
+        local web_port_line=$(grep "^POLYMARKET_WEB_PORT=" .env 2>/dev/null)
+        local forward_port_line=$(grep "^POLYMARKET_FORWARD_PORT=" .env 2>/dev/null)
+
+        if [ -n "$web_port_line" ]; then
+            WEB_PORT=$(echo "$web_port_line" | cut -d'=' -f2)
+        fi
+        if [ -n "$forward_port_line" ]; then
+            FORWARD_PORT=$(echo "$forward_port_line" | cut -d'=' -f2)
+        fi
+    fi
+}
+
+# Load ports on script start
+get_configured_ports
+
 # ==================== Utilities ====================
 print_banner() {
     clear
@@ -280,11 +303,11 @@ start_foreground() {
     fi
 
     print_section "Starting Application"
-    echo -e "  ${ARROW} Web Dashboard:   ${CYAN}http://0.0.0.0:8080${NC}"
+    echo -e "  ${ARROW} Web Dashboard:   ${CYAN}http://0.0.0.0:${WEB_PORT}${NC}"
     if [ -n "$LOCAL_IP" ]; then
-        echo -e "  ${ARROW} Network Access:  ${CYAN}http://$LOCAL_IP:8080${NC}"
+        echo -e "  ${ARROW} Network Access:  ${CYAN}http://$LOCAL_IP:${WEB_PORT}${NC}"
     fi
-    echo -e "  ${ARROW} Forward Server:  ${CYAN}ws://0.0.0.0:8765${NC}"
+    echo -e "  ${ARROW} Forward Server:  ${CYAN}ws://0.0.0.0:${FORWARD_PORT}${NC}"
     echo ""
     echo -e "  ${DIM}Press Ctrl+C to stop${NC}"
     echo ""
@@ -325,11 +348,11 @@ start_background() {
         print_info "Started with PID: $ENV_RUNNING"
         echo ""
         echo -e "  ${ARROW} Log file:        ${CYAN}$LOG_FILE${NC}"
-        echo -e "  ${ARROW} Web Dashboard:   ${CYAN}http://0.0.0.0:8080${NC}"
+        echo -e "  ${ARROW} Web Dashboard:   ${CYAN}http://0.0.0.0:${WEB_PORT}${NC}"
         if [ -n "$LOCAL_IP" ]; then
-            echo -e "  ${ARROW} Network Access:  ${CYAN}http://$LOCAL_IP:8080${NC}"
+            echo -e "  ${ARROW} Network Access:  ${CYAN}http://$LOCAL_IP:${WEB_PORT}${NC}"
         fi
-        echo -e "  ${ARROW} Forward Server:  ${CYAN}ws://0.0.0.0:8765${NC}"
+        echo -e "  ${ARROW} Forward Server:  ${CYAN}ws://0.0.0.0:${FORWARD_PORT}${NC}"
         echo ""
         echo -e "  ${DIM}View logs: tail -f $LOG_FILE${NC}"
     else

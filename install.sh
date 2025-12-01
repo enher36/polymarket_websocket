@@ -197,8 +197,77 @@ install_curl() {
     install_package "curl" "curl"
 }
 
+# ==================== Port Configuration ====================
+WEB_PORT=8080
+FORWARD_PORT=8765
+
+configure_ports() {
+    echo -e "\n${BOLD}Port Configuration${NC}\n"
+    echo -e "  ${DIM}Press Enter to use default values${NC}\n"
+
+    # Web Dashboard Port
+    read -p "  Web Dashboard port [${WEB_PORT}]: " input_web_port
+    if [ -n "$input_web_port" ]; then
+        if [[ "$input_web_port" =~ ^[0-9]+$ ]] && [ "$input_web_port" -ge 1 ] && [ "$input_web_port" -le 65535 ]; then
+            WEB_PORT="$input_web_port"
+        else
+            print_warn "Invalid port, using default: $WEB_PORT"
+        fi
+    fi
+
+    # Forward Server Port
+    read -p "  Forward Server port [${FORWARD_PORT}]: " input_forward_port
+    if [ -n "$input_forward_port" ]; then
+        if [[ "$input_forward_port" =~ ^[0-9]+$ ]] && [ "$input_forward_port" -ge 1 ] && [ "$input_forward_port" -le 65535 ]; then
+            FORWARD_PORT="$input_forward_port"
+        else
+            print_warn "Invalid port, using default: $FORWARD_PORT"
+        fi
+    fi
+
+    echo ""
+    print_info "Web Dashboard: port $WEB_PORT"
+    print_info "Forward Server: port $FORWARD_PORT"
+}
+
+write_env_config() {
+    local env_file="$1"
+
+    cat > "$env_file" << EOF
+# Polymarket API Configuration
+POLYMARKET_API_URL=https://gamma-api.polymarket.com
+POLYMARKET_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
+POLYMARKET_DB_PATH=polymarket.db
+
+# HTTP Settings
+POLYMARKET_HTTP_TIMEOUT=10
+POLYMARKET_HTTP_RPS=2
+
+# WebSocket Settings
+POLYMARKET_WS_HEARTBEAT_SEC=15
+POLYMARKET_WS_RECONNECT_SEC=5
+
+# Web Dashboard Settings
+POLYMARKET_WEB_ENABLED=true
+POLYMARKET_WEB_HOST=0.0.0.0
+POLYMARKET_WEB_PORT=${WEB_PORT}
+
+# Forward Server Settings
+POLYMARKET_FORWARD_ENABLED=true
+POLYMARKET_FORWARD_HOST=0.0.0.0
+POLYMARKET_FORWARD_PORT=${FORWARD_PORT}
+
+# Scanner Settings
+POLYMARKET_SCAN_INTERVAL_SEC=300
+POLYMARKET_CATEGORY=
+
+# Logging
+POLYMARKET_LOG_LEVEL=INFO
+EOF
+}
+
 # ==================== Main Installation ====================
-TOTAL_STEPS=6
+TOTAL_STEPS=7
 
 main() {
     print_banner
@@ -287,8 +356,12 @@ main() {
         fi
     fi
 
-    # Step 4: Clone repository
-    print_step 4 "Cloning repository..."
+    # Step 4: Configure ports
+    print_step 4 "Configuring ports..."
+    configure_ports
+
+    # Step 5: Clone repository
+    print_step 5 "Cloning repository..."
 
     if [ -d "$INSTALL_DIR" ]; then
         print_warn "Directory already exists: $INSTALL_DIR"
@@ -311,8 +384,8 @@ main() {
 
     cd "$INSTALL_DIR"
 
-    # Step 5: Setup virtual environment
-    print_step 5 "Installing dependencies..."
+    # Step 6: Setup virtual environment
+    print_step 6 "Installing dependencies..."
 
     echo -e "  ${ARROW} Creating virtual environment..."
     uv venv .venv
@@ -325,13 +398,12 @@ main() {
     echo -ne "\r"
     print_info "Dependencies installed"
 
-    # Step 6: Finalize
-    print_step 6 "Finalizing setup..."
+    # Step 7: Finalize
+    print_step 7 "Finalizing setup..."
 
-    if [ -f ".env.example" ] && [ ! -f ".env" ]; then
-        cp .env.example .env
-        print_info "Created .env configuration file"
-    fi
+    # Create .env with configured ports
+    write_env_config ".env"
+    print_info "Created .env with custom ports (Web: $WEB_PORT, Forward: $FORWARD_PORT)"
 
     chmod +x start.sh
     print_info "Made start.sh executable"
@@ -354,11 +426,11 @@ main() {
     echo -e "    ./start.sh"
     echo ""
     echo -e "  ${BOLD}Access URLs:${NC}"
-    echo -e "    ${ARROW} Local:    ${CYAN}http://localhost:8080${NC}"
+    echo -e "    ${ARROW} Local:     ${CYAN}http://localhost:${WEB_PORT}${NC}"
     if [ -n "$LOCAL_IP" ]; then
-        echo -e "    ${ARROW} Network:  ${CYAN}http://$LOCAL_IP:8080${NC}"
+        echo -e "    ${ARROW} Network:   ${CYAN}http://$LOCAL_IP:${WEB_PORT}${NC}"
     fi
-    echo -e "    ${ARROW} WebSocket: ${CYAN}ws://0.0.0.0:8765${NC}"
+    echo -e "    ${ARROW} WebSocket: ${CYAN}ws://0.0.0.0:${FORWARD_PORT}${NC}"
     echo ""
 
     # Ask to start now
