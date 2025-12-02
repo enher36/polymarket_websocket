@@ -32,12 +32,15 @@ class ForwardServer:
     - Event bus integration for receiving upstream data
 
     Client Protocol:
-    - Subscribe: {"action": "subscribe", "token": "<token_id>"}
-    - Unsubscribe: {"action": "unsubscribe", "token": "<token_id>"}
+    - Subscribe: {"action": "subscribe", "token_id": "<token_id>"} (legacy: "token")
+    - Subscribe batch: {"action": "subscribe_batch", "token_ids": ["<id1>", "<id2>", ...]}
+    - Unsubscribe: {"action": "unsubscribe", "token_id": "<token_id>"} (legacy: "token")
     - List markets: {"action": "list_markets", "category": "<optional>", "limit": 100}
     - Subscribe category: {"action": "subscribe_category", "category": "<category>"}
     - Subscribe all: {"action": "subscribe_all"}
     - Ping: {"action": "ping"}
+
+    Response format uses "type" field (with "status" for backward compatibility).
     """
 
     def __init__(
@@ -147,6 +150,52 @@ class ForwardServer:
         finally:
             await self._cleanup_connection(websocket)
 
+    def _get_token_id(self, message: dict[str, Any]) -> Optional[str]:
+        """Extract token_id from message with backward compatibility.
+
+        Accepts both 'token_id' (preferred) and 'token' (legacy) fields.
+
+        Args:
+            message: The parsed JSON message from client.
+
+        Returns:
+            The token_id string if valid, None otherwise.
+        """
+        token_id = message.get("token_id") or message.get("token")
+        if token_id is None:
+            return None
+        token_id = str(token_id).strip()
+        return token_id if token_id else None
+
+    def _get_token_ids(self, message: dict[str, Any]) -> Optional[list[str]]:
+        """Extract and validate token_ids list from message.
+
+        Performs deduplication and filters empty/invalid entries.
+
+        Args:
+            message: The parsed JSON message from client.
+
+        Returns:
+            List of valid token_id strings, or None if token_ids field is missing/invalid.
+        """
+        token_ids = message.get("token_ids")
+        if token_ids is None:
+            return None
+        if not isinstance(token_ids, list):
+            return None
+
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in token_ids:
+            if item is None:
+                continue
+            token_id = str(item).strip()
+            if not token_id or token_id in seen:
+                continue
+            seen.add(token_id)
+            result.append(token_id)
+        return result
+
     async def _process_message(
         self, websocket: WebSocketServerProtocol, raw_message: str
     ) -> None:
@@ -158,18 +207,55 @@ class ForwardServer:
             return
 
         action = str(message.get("action", "")).lower()
-        token = message.get("token")
 
-        if action == "subscribe" and token:
-            await self._add_subscription(websocket, str(token))
+        if action == "subscribe":
+            token_id = self._get_token_id(message)
+            if not token_id:
+                await self._send_error(websocket, "invalid_token_id")
+                return
+            await self._add_subscription(websocket, token_id)
             await websocket.send(
-                json.dumps({"status": "subscribed", "token": token})
+                json.dumps({
+                    "type": "subscribed",
+                    "token_id": token_id,
+                    # Backward compatibility
+                    "status": "subscribed",
+                    "token": token_id,
+                })
             )
 
-        elif action == "unsubscribe" and token:
-            await self._remove_subscription(str(token), websocket)
+        elif action == "subscribe_batch":
+            token_ids = self._get_token_ids(message)
+            if token_ids is None:
+                await self._send_error(websocket, "invalid_token_ids")
+                return
+            if not token_ids:
+                await self._send_error(websocket, "empty_token_ids")
+                return
+            await self._subscribe_tokens_bulk(websocket, token_ids)
             await websocket.send(
-                json.dumps({"status": "unsubscribed", "token": token})
+                json.dumps({
+                    "type": "subscribed_batch",
+                    "token_ids": token_ids,
+                    # Backward compatibility
+                    "status": "subscribed_batch",
+                })
+            )
+
+        elif action == "unsubscribe":
+            token_id = self._get_token_id(message)
+            if not token_id:
+                await self._send_error(websocket, "invalid_token_id")
+                return
+            await self._remove_subscription(token_id, websocket)
+            await websocket.send(
+                json.dumps({
+                    "type": "unsubscribed",
+                    "token_id": token_id,
+                    # Backward compatibility
+                    "status": "unsubscribed",
+                    "token": token_id,
+                })
             )
 
         elif action == "list_markets":
@@ -182,7 +268,7 @@ class ForwardServer:
             await self._handle_subscribe_category(websocket, {"category": None})
 
         elif action == "ping":
-            await websocket.send(json.dumps({"status": "pong"}))
+            await websocket.send(json.dumps({"type": "pong", "status": "pong"}))
 
         else:
             await self._send_error(websocket, "unsupported_action")
@@ -190,9 +276,16 @@ class ForwardServer:
     async def _send_error(
         self, websocket: WebSocketServerProtocol, error: str
     ) -> None:
-        """Send error response to client."""
+        """Send error response to client with unified format."""
         try:
-            await websocket.send(json.dumps({"error": error}))
+            await websocket.send(
+                json.dumps({
+                    "type": "error",
+                    "error": error,
+                    # Backward compatibility
+                    "status": "error",
+                })
+            )
         except websockets.ConnectionClosed:
             pass
 
