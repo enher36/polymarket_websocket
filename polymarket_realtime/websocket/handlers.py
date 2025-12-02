@@ -414,6 +414,10 @@ async def route_message(raw_message: str, db: Database) -> None:
         raw_message: Raw JSON string from WebSocket.
         db: Database instance for persistence.
     """
+    # Skip empty messages and heartbeat responses
+    if not raw_message or raw_message == "PONG":
+        return
+
     try:
         data = json.loads(raw_message)
     except json.JSONDecodeError as e:
@@ -422,6 +426,9 @@ async def route_message(raw_message: str, db: Database) -> None:
 
     # Handle array format (Polymarket market channel sends arrays)
     if isinstance(data, list):
+        # Skip empty arrays (subscription confirmations)
+        if not data:
+            return
         for item in data:
             if isinstance(item, dict):
                 await _route_single_message(item, db)

@@ -122,14 +122,15 @@ class WebSocketManager:
     async def _send_subscription(self, token_id: str, channel: str) -> None:
         """Send subscription message to server.
 
-        Polymarket market channel uses assets_ids format.
+        Polymarket market channel uses assets_ids format with type field.
         """
         if not self._ws:
             return
 
-        # Polymarket market channel format
+        # Polymarket market channel format (requires type: "market")
         message = json.dumps({
             "assets_ids": [token_id],
+            "type": "market",
         })
         await self._ws.send(message)
         logger.debug(
@@ -215,7 +216,8 @@ class WebSocketManager:
         """
         while self._is_running and self._ws:
             try:
-                await self._ws.send(json.dumps({"type": "ping"}))
+                # Polymarket expects plain "PING" string, not JSON
+                await self._ws.send("PING")
                 logger.debug("Sent heartbeat ping")
                 # Prune stale orderbook state during heartbeat
                 # This ensures TTL-based cleanup works even in low-volume scenarios
