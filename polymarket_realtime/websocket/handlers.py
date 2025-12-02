@@ -1,8 +1,10 @@
 """WebSocket message handlers for Polymarket data streams."""
 
 import json
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+from time import monotonic
 from typing import Any, Callable, Coroutine, Optional
 
 from polymarket_realtime.database.repository import Database
@@ -15,9 +17,81 @@ logger = get_logger(__name__)
 # Type alias for message handlers
 MessageHandler = Callable[[dict[str, Any], Database], Coroutine[Any, Any, None]]
 
+# Memory management constants for orderbook state
+_ORDERBOOK_MAX_ENTRIES = 10_000  # Max tokens to track (Polymarket has ~3000 active tokens)
+_ORDERBOOK_TTL_SECONDS = 10 * 60  # Prune tokens inactive for 10 minutes
+_ORDERBOOK_PRUNE_INTERVAL = 1000  # Prune every N messages processed
+
+
+@dataclass(slots=True)
+class _OrderbookState:
+    """Track sequence and freshness for an orderbook token."""
+
+    last_sequence: int
+    has_snapshot: bool
+    last_seen_monotonic: float = field(default_factory=monotonic)
+
+
 # Sequence tracking for orderbook integrity
-# Maps token_id -> (last_sequence, has_snapshot)
-_orderbook_state: dict[str, tuple[int, bool]] = {}
+# Maps token_id -> _OrderbookState
+_orderbook_state: dict[str, _OrderbookState] = {}
+_orderbook_message_count: int = 0
+
+
+def _prune_orderbook_state(now: float | None = None) -> int:
+    """Remove stale entries to bound memory usage.
+
+    Returns:
+        Number of entries pruned.
+    """
+    if not _orderbook_state:
+        return 0
+
+    now = now or monotonic()
+    pruned = 0
+
+    # Remove entries that haven't been updated within TTL
+    stale_keys = [
+        token_id
+        for token_id, state in _orderbook_state.items()
+        if now - state.last_seen_monotonic > _ORDERBOOK_TTL_SECONDS
+    ]
+    for token_id in stale_keys:
+        _orderbook_state.pop(token_id, None)
+        pruned += 1
+
+    # If still over limit, remove oldest entries
+    if len(_orderbook_state) > _ORDERBOOK_MAX_ENTRIES:
+        overflow = len(_orderbook_state) - _ORDERBOOK_MAX_ENTRIES
+        sorted_items = sorted(
+            _orderbook_state.items(),
+            key=lambda kv: kv[1].last_seen_monotonic,
+        )
+        for token_id, _ in sorted_items[:overflow]:
+            _orderbook_state.pop(token_id, None)
+            pruned += 1
+
+    if pruned > 0:
+        logger.debug(
+            "Pruned orderbook state",
+            extra={"ctx_pruned": pruned, "ctx_remaining": len(_orderbook_state)},
+        )
+
+    return pruned
+
+
+def prune_orderbook_state() -> int:
+    """Expose pruning for external schedulers/health checks.
+
+    Returns:
+        Number of entries pruned.
+    """
+    return _prune_orderbook_state()
+
+
+def get_orderbook_state_size() -> int:
+    """Get current size of orderbook state for monitoring."""
+    return len(_orderbook_state)
 
 
 def _parse_timestamp(ts: int | str | None) -> datetime:
@@ -178,6 +252,8 @@ async def handle_orderbook_message(data: dict[str, Any], db: Database) -> None:
         "seq": 2
     }
     """
+    global _orderbook_message_count
+
     try:
         token_id = data.get("market") or data.get("asset_id")
         if not token_id:
@@ -188,8 +264,17 @@ async def handle_orderbook_message(data: dict[str, Any], db: Database) -> None:
         msg_type = data.get("type", "").lower()
         sequence = data.get("seq") or data.get("sequence")
 
+        # Periodic pruning to bound memory (every N messages)
+        _orderbook_message_count += 1
+        now = monotonic()
+        if _orderbook_message_count >= _ORDERBOOK_PRUNE_INTERVAL:
+            _orderbook_message_count = 0
+            _prune_orderbook_state(now)
+
         # Get current state for this token
-        last_seq, has_snapshot = _orderbook_state.get(token_id, (-1, False))
+        state = _orderbook_state.get(token_id)
+        last_seq = state.last_sequence if state else -1
+        has_snapshot = state.has_snapshot if state else False
 
         # Determine event type for forwarding
         event_type = str(data.get("event_type") or msg_type or "book")
@@ -198,7 +283,11 @@ async def handle_orderbook_message(data: dict[str, Any], db: Database) -> None:
         if msg_type == "snapshot":
             snapshot = OrderbookSnapshot.from_ws_message(token_id, data)
             await db.upsert_orderbook(snapshot)
-            _orderbook_state[token_id] = (sequence or 0, True)
+            _orderbook_state[token_id] = _OrderbookState(
+                last_sequence=sequence or 0,
+                has_snapshot=True,
+                last_seen_monotonic=now,
+            )
             logger.debug(
                 "Processed orderbook snapshot",
                 extra={
@@ -251,7 +340,11 @@ async def handle_orderbook_message(data: dict[str, Any], db: Database) -> None:
 
             snapshot = OrderbookSnapshot.from_ws_message(token_id, data)
             await db.upsert_orderbook(snapshot)
-            _orderbook_state[token_id] = (sequence or last_seq, True)
+            _orderbook_state[token_id] = _OrderbookState(
+                last_sequence=sequence or last_seq,
+                has_snapshot=True,
+                last_seen_monotonic=now,
+            )
             logger.debug(
                 "Applied orderbook update",
                 extra={
@@ -271,6 +364,12 @@ async def handle_orderbook_message(data: dict[str, Any], db: Database) -> None:
         # Fallback for unknown types - just process
         snapshot = OrderbookSnapshot.from_ws_message(token_id, data)
         await db.upsert_orderbook(snapshot)
+        # Update state tracking even for unknown types
+        _orderbook_state[token_id] = _OrderbookState(
+            last_sequence=sequence or last_seq,
+            has_snapshot=has_snapshot,
+            last_seen_monotonic=now,
+        )
         logger.debug(
             "Updated orderbook (unknown type)",
             extra={
@@ -298,11 +397,12 @@ def reset_orderbook_state(token_id: str | None = None) -> None:
     Args:
         token_id: Specific token to reset, or None to reset all.
     """
-    global _orderbook_state
+    global _orderbook_state, _orderbook_message_count
     if token_id:
         _orderbook_state.pop(token_id, None)
     else:
         _orderbook_state.clear()
+        _orderbook_message_count = 0
 
 
 async def route_message(raw_message: str, db: Database) -> None:

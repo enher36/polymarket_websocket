@@ -10,7 +10,11 @@ from websockets.exceptions import ConnectionClosed
 
 from polymarket_realtime.database.repository import Database
 from polymarket_realtime.utils.logging import get_logger
-from polymarket_realtime.websocket.handlers import route_message
+from polymarket_realtime.websocket.handlers import (
+    prune_orderbook_state,
+    reset_orderbook_state,
+    route_message,
+)
 
 logger = get_logger(__name__)
 
@@ -100,6 +104,8 @@ class WebSocketManager:
             token_id: Token ID to unsubscribe from.
         """
         channels = self._subscriptions.pop(token_id, None)
+        # Clean up orderbook tracking state for this token
+        reset_orderbook_state(token_id)
 
         # Send unsubscribe if connected
         if channels and self.is_connected:
@@ -205,11 +211,15 @@ class WebSocketManager:
         """Send periodic heartbeat pings.
 
         On failure, closes the connection to trigger reconnection.
+        Also triggers orderbook state pruning to handle low-volume scenarios.
         """
         while self._is_running and self._ws:
             try:
                 await self._ws.send(json.dumps({"type": "ping"}))
                 logger.debug("Sent heartbeat ping")
+                # Prune stale orderbook state during heartbeat
+                # This ensures TTL-based cleanup works even in low-volume scenarios
+                prune_orderbook_state()
             except Exception as e:
                 logger.warning("Heartbeat failed, triggering reconnect", extra={"ctx_error": str(e)})
                 # Close the connection to trigger reconnection
@@ -313,6 +323,9 @@ class WebSocketManager:
             self._heartbeat_task.cancel()
 
         await self.disconnect()
+
+        # Clear all orderbook tracking state to prevent memory leak
+        reset_orderbook_state()
 
     # ==================== Callbacks ====================
 

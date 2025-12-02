@@ -106,6 +106,28 @@ class EventBus:
             extra={"ctx_token_id": token_id},
         )
 
+    async def unsubscribe_all(self, token_id: str | None = None) -> int:
+        """Forcefully clear subscriptions to avoid leaks when clients disconnect.
+
+        Args:
+            token_id: Specific token to clear, or None to clear all.
+
+        Returns:
+            Number of subscriptions cleared.
+        """
+        async with self._lock:
+            if token_id:
+                callbacks = self._subscribers.pop(token_id, set())
+                cleared = len(callbacks)
+            else:
+                cleared = sum(len(cbs) for cbs in self._subscribers.values())
+                self._subscribers.clear()
+        logger.debug(
+            "Cleared forward subscribers",
+            extra={"ctx_token_id": token_id or "*", "ctx_cleared": cleared},
+        )
+        return cleared
+
     @property
     def subscriber_count(self) -> int:
         """Get total number of subscriptions."""
