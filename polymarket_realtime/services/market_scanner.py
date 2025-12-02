@@ -31,7 +31,7 @@ class MarketScanner:
         self,
         client: PolymarketClient,
         db: Database,
-        page_size: int = 100,
+        page_size: int = 500,
     ) -> None:
         self._client = client
         self._db = db

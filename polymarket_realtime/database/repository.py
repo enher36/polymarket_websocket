@@ -145,33 +145,42 @@ class Database:
     async def list_active_markets(
         self, category: Optional[str] = None, limit: int = 100, offset: int = 0
     ) -> list[dict]:
-        """List active markets with optional category filter."""
+        """List active markets with optional category filter.
+
+        Only returns markets that are active AND not expired (end_date > now or NULL).
+        """
         async with self._get_connection() as conn:
+            now_iso = datetime.now(timezone.utc).isoformat()
             if category:
                 cursor = await conn.execute(
                     """
                     SELECT * FROM markets
-                    WHERE active = 1 AND category = ?
+                    WHERE active = 1
+                      AND category = ?
+                      AND (end_date IS NULL OR end_date > ?)
                     ORDER BY updated_at DESC
                     LIMIT ? OFFSET ?
                     """,
-                    (category, limit, offset),
+                    (category, now_iso, limit, offset),
                 )
             else:
                 cursor = await conn.execute(
                     """
                     SELECT * FROM markets
                     WHERE active = 1
+                      AND (end_date IS NULL OR end_date > ?)
                     ORDER BY updated_at DESC
                     LIMIT ? OFFSET ?
                     """,
-                    (limit, offset),
+                    (now_iso, limit, offset),
                 )
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
     async def list_active_market_ids(self, category: Optional[str] = None) -> set[str]:
         """Get set of all active market IDs.
+
+        Only returns markets that are active AND not expired (end_date > now or NULL).
 
         Args:
             category: Optional category filter.
@@ -180,14 +189,25 @@ class Database:
             Set of market IDs.
         """
         async with self._get_connection() as conn:
+            now_iso = datetime.now(timezone.utc).isoformat()
             if category:
                 cursor = await conn.execute(
-                    "SELECT id FROM markets WHERE active = 1 AND category = ?",
-                    (category,),
+                    """
+                    SELECT id FROM markets
+                    WHERE active = 1
+                      AND category = ?
+                      AND (end_date IS NULL OR end_date > ?)
+                    """,
+                    (category, now_iso),
                 )
             else:
                 cursor = await conn.execute(
-                    "SELECT id FROM markets WHERE active = 1",
+                    """
+                    SELECT id FROM markets
+                    WHERE active = 1
+                      AND (end_date IS NULL OR end_date > ?)
+                    """,
+                    (now_iso,),
                 )
             rows = await cursor.fetchall()
             return {row["id"] for row in rows}
@@ -196,6 +216,7 @@ class Database:
         """Get count of active markets efficiently.
 
         Uses COUNT(*) for optimal performance instead of loading all IDs.
+        Only counts markets that are active AND not expired (end_date > now or NULL).
 
         Args:
             category: Optional category filter.
@@ -204,14 +225,25 @@ class Database:
             Number of active markets.
         """
         async with self._get_connection() as conn:
+            now_iso = datetime.now(timezone.utc).isoformat()
             if category:
                 cursor = await conn.execute(
-                    "SELECT COUNT(*) as cnt FROM markets WHERE active = 1 AND category = ?",
-                    (category,),
+                    """
+                    SELECT COUNT(*) as cnt FROM markets
+                    WHERE active = 1
+                      AND category = ?
+                      AND (end_date IS NULL OR end_date > ?)
+                    """,
+                    (category, now_iso),
                 )
             else:
                 cursor = await conn.execute(
-                    "SELECT COUNT(*) as cnt FROM markets WHERE active = 1",
+                    """
+                    SELECT COUNT(*) as cnt FROM markets
+                    WHERE active = 1
+                      AND (end_date IS NULL OR end_date > ?)
+                    """,
+                    (now_iso,),
                 )
             row = await cursor.fetchone()
             return row["cnt"] if row else 0
