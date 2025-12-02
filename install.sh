@@ -24,6 +24,7 @@ WARN="${YELLOW}!${NC}"
 ARROW="${CYAN}→${NC}"
 
 # ==================== Configuration ====================
+VERSION="1.1.0"
 REPO_URL="https://github.com/enher36/polymarket_websocket.git"
 INSTALL_DIR="$HOME/polymarket_websocket"
 
@@ -98,7 +99,7 @@ print_banner() {
     echo "  ║                                                           ║"
     echo "  ║   ${BOLD}Polymarket Real-time Data Fetcher${NC}${CYAN}                      ║"
     echo "  ║                                                           ║"
-    echo "  ║   ${DIM}One-line Installer${NC}${CYAN}                                      ║"
+    echo "  ║   ${DIM}One-line Installer v${VERSION}${NC}${CYAN}                              ║"
     echo "  ║                                                           ║"
     echo "  ╚═══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -246,6 +247,49 @@ configure_ports() {
     echo ""
     print_info "Web Dashboard: port $WEB_PORT"
     print_info "Forward Server: port $FORWARD_PORT"
+}
+
+# ==================== Systemd Service ====================
+install_systemd_service() {
+    if [ "$OS_TYPE" != "linux" ]; then
+        print_warn "Systemd service only available on Linux"
+        return 1
+    fi
+
+    local service_file="/etc/systemd/system/polymarket.service"
+    local user_name=$(whoami)
+
+    echo -e "  ${ARROW} Creating systemd service..."
+
+    $SUDO_CMD tee "$service_file" > /dev/null << SVCEOF
+[Unit]
+Description=Polymarket Real-time Data Fetcher
+After=network.target
+
+[Service]
+Type=simple
+User=${user_name}
+WorkingDirectory=${INSTALL_DIR}
+ExecStart=${INSTALL_DIR}/.venv/bin/python -m polymarket_realtime.main
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+    $SUDO_CMD systemctl daemon-reload
+    $SUDO_CMD systemctl enable polymarket.service
+
+    print_info "Systemd service installed"
+    echo ""
+    echo -e "  ${DIM}Commands:${NC}"
+    echo -e "    ${CYAN}sudo systemctl start polymarket${NC}   - Start service"
+    echo -e "    ${CYAN}sudo systemctl status polymarket${NC}  - Check status"
+    echo -e "    ${CYAN}sudo journalctl -u polymarket -f${NC}  - View logs"
+    echo ""
 }
 
 write_env_config() {
@@ -463,6 +507,7 @@ main() {
     echo -e "\n${GREEN}${BOLD}━━━ Installation Complete! ━━━${NC}\n"
 
     echo -e "  ${BOLD}Location:${NC} $INSTALL_DIR"
+    echo -e "  ${BOLD}Version:${NC}  $VERSION"
     echo ""
     echo -e "  ${BOLD}Quick Start:${NC}"
     echo -e "    cd $INSTALL_DIR"
@@ -475,6 +520,16 @@ main() {
     fi
     echo -e "    ${ARROW} WebSocket: ${CYAN}ws://0.0.0.0:${FORWARD_PORT}${NC}"
     echo ""
+
+    # Ask about systemd service (Linux only, interactive mode)
+    if [ "$OS_TYPE" = "linux" ] && can_read_tty && exec 3</dev/tty 2>/dev/null; then
+        exec 3<&-
+        read -p "  Install as systemd service (auto-start on boot)? [y/N] " -n 1 -r < /dev/tty
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            install_systemd_service
+        fi
+    fi
 
     # Ask to start now (skip in non-interactive mode)
     if can_read_tty && exec 3</dev/tty 2>/dev/null; then
